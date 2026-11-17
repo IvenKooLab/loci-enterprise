@@ -1,0 +1,2 @@
+{"query": "住宿上限是多少", "expect_facts": ["800"], "library": "policy", "principals": ["public"]}
+{"query": "年假多少天", "expect_facts": ["15"], "library": "policy", "principals": ["public"]}
