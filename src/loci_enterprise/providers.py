@@ -6,7 +6,10 @@ to run on a sample of live traffic. That is the only reason this abstraction
 exists.
 
 Defaults target DeepSeek's OpenAI-compatible API (base_url
-`https://api.deepseek.com`, models `deepseek-chat` / `deepseek-reasoner`).
+`https://api.deepseek.com`). The model *names* move: as of 2026-11 the
+catalogue is `deepseek-flash` and `deepseek-v4-pro` (1M context, JSON output),
+and the older `deepseek-chat` / `deepseek-reasoner` aliases are retired. Pin
+the name in config or `DEEPSEEK_MODEL` rather than trusting a default.
 Note the asymmetry that trips people up: that endpoint serves chat
 completions, **not** embeddings — configure `[embed]` separately, point it at
 an embedding-capable provider or a local model, and keep the two independent.
@@ -81,13 +84,20 @@ class OpenAICompatProvider(Provider):
                           raw=body)
 
 
-def deepseek(*, api_key: str | None = None, model: str = "deepseek-chat",
+def deepseek(*, api_key: str | None = None, model: str | None = None,
              base_url: str = "https://api.deepseek.com") -> OpenAICompatProvider:
-    """DeepSeek chat provider. Judge work suits `deepseek-chat`."""
+    """DeepSeek chat provider.
+
+    `deepseek-flash` is the sensible judge default: judging is short-context,
+    high-volume work, and the pro model costs an order of magnitude more per
+    output token for a verdict. Pass `deepseek-v4-pro` only to adjudicate
+    hard cross-file inferences.
+    """
     key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
     if not key:
         raise ProviderError("DEEPSEEK_API_KEY is not set")
-    return OpenAICompatProvider(base_url=base_url, api_key=key, model=model,
+    chosen = model or os.environ.get("DEEPSEEK_MODEL") or "deepseek-flash"
+    return OpenAICompatProvider(base_url=base_url, api_key=key, model=chosen,
                                 name="deepseek")
 
 

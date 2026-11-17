@@ -138,12 +138,12 @@ Two consequences worth stating:
 from loci_enterprise.providers import deepseek
 from loci_enterprise.judge import verify
 
-v = verify(deepseek(model="deepseek-chat"), question, answer, hits)
+v = verify(deepseek(model="deepseek-flash"), question, answer, hits)
 v.faithfulness, v.cross_file, v.acceptable
 ```
 
-- **Judge** runs on a sample of live traffic. `deepseek-chat` is a reasonable
-  default; any OpenAI-compatible endpoint works (`OpenAICompatProvider`).
+- **Judge** runs on a sample of live traffic. Any OpenAI-compatible endpoint
+  works (`OpenAICompatProvider`); the DeepSeek default is `deepseek-flash`.
   `StubProvider` keeps tests and demos offline and deterministic.
 - **Embeddings are a separate provider.** DeepSeek's API serves chat
   completions, not `/embeddings`; point `[embed]` at an embedding-capable
@@ -160,9 +160,12 @@ v.faithfulness, v.cross_file, v.acceptable
   excerpts, which is exactly the data an enterprise does not want to ship
   elsewhere. MIT weights mean the judge can run on-prem, on the same network
   boundary as the corpus.
-- **`deepseek-chat`** is the pragmatic judge default (V3.2, 128K context);
-  `deepseek-reasoner` costs more and is worth it only for adjudicating
-  cross-file inferences, not for scoring every sampled answer.
+- **Model names move; pin them.** As of 2026-11 the API catalogue is
+  `deepseek-flash` (V4.1-Flash, 1M context, JSON output) and `deepseek-v4-pro`
+  (larger, ~10x the output price). `deepseek-chat` / `deepseek-reasoner` are
+  retired aliases. `deepseek-flash` is the judge default here — judging is
+  short-context, high-volume work; the pro model earns its price only when
+  adjudicating a hard cross-file inference.
 - **No embeddings endpoint.** The API serves `/chat/completions` only. Pair it
   with a local embedding model or another provider; keep `[embed]` independent
   so a chat-model swap never silently invalidates the vector space.
