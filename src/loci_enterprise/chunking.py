@@ -11,6 +11,25 @@ import re
 MAX_CHARS = 700
 MIN_CHARS = 120
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fence_after(line: str, fence: str | None) -> str | None:
+    """Fence state after this line, per CommonMark: a fence opens on three or
+    more backticks (info string without backticks) or tildes, and closes only
+    on a run of the same character, at least as long, with nothing but
+    trailing whitespace after it. A naive toggle on any ``` line lets an inner
+    triple-backtick example close an outer four-backtick fence, and then the
+    example's literal `# heading` lines hijack the section trail."""
+    match = _FENCE.match(line)
+    if not match:
+        return fence
+    marker, info = match.groups()
+    if fence:
+        if marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip(" \t"):
+            return None
+        return fence
+    return marker if marker[0] == "~" or "`" not in info else None
 
 
 def chunk_document(body: str, title: str = "") -> list[str]:
@@ -19,6 +38,7 @@ def chunk_document(body: str, title: str = "") -> list[str]:
     sections: list[tuple[list[str], list[str]]] = []
     trail: list[str] = []
     buf: list[str] = []
+    fence: str | None = None
 
     def flush() -> None:
         text = "\n".join(buf).strip()
@@ -27,7 +47,12 @@ def chunk_document(body: str, title: str = "") -> list[str]:
         buf.clear()
 
     for line in lines:
-        m = _HEADING.match(line)
+        next_fence = _fence_after(line, fence)
+        if next_fence != fence:
+            fence = next_fence
+            buf.append(line)
+            continue
+        m = None if fence else _HEADING.match(line)
         if m:
             flush()
             level = len(m.group(1))
