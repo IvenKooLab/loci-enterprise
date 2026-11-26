@@ -28,6 +28,7 @@ from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import doctor as doctor_mod
+from . import portability as portability_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from . import providers as providers_mod
 from . import queue as queue_mod
@@ -166,6 +167,20 @@ def cmd_chain(args) -> int:
         mark = "*" if cur and item["path"] == cur["path"] else " "
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
+    return 0
+
+
+def cmd_export(args) -> int:
+    info = portability_mod.save_export(_store(args), args.tenant, args.out)
+    print(json.dumps(info, ensure_ascii=False))
+    return 0
+
+
+def cmd_import(args) -> int:
+    report = portability_mod.import_tenant(
+        _store(args), args.to_tenant, portability_mod.load_export(args.file),
+        actor=args.actor)
+    print(json.dumps(report.as_dict(), ensure_ascii=False))
     return 0
 
 
@@ -659,6 +674,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("export", help="export one tenant's data as JSON")
+    q.add_argument("out")
+    q.set_defaults(func=cmd_export)
+
+    q = sub.add_parser("import", help="import a tenant export into a tenant")
+    q.add_argument("file")
+    q.add_argument("--to-tenant", dest="to_tenant", default="default")
+    q.add_argument("--actor", default="cli")
+    q.set_defaults(func=cmd_import)
 
     q = sub.add_parser("doctor", help="self-check: integrity, orphans, ACL, jobs, connectors")
     q.add_argument("--json", action="store_true")
