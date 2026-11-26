@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "loci-enterprise"
-version = "0.1.0"
-description = "Retrieval-quality-governed knowledge base: lifecycle, multi-writer governance, drift monitoring and a feedback loop."
+version = "0.2.0"
+description = "MCP-first knowledge base with retrieval-quality governance: lifecycle, drift monitoring, feedback, connectors, wiki, agent and deployment."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

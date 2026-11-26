@@ -1,12 +1,14 @@
 # loci-enterprise
 
-**A knowledge base that measures itself.** Retrieval quality governance for RAG:
-document lifecycle, multi-writer safety, drift monitoring and a feedback loop —
-in about 2k lines of stdlib Python you can read in one sitting.
+**A knowledge base that measures itself.** An MCP-first knowledge base with
+retrieval-quality governance built in: document lifecycle, multi-writer safety,
+drift monitoring, feedback, plus the plumbing a real deployment needs —
+connectors, parsers, wiki, queue, scheduler, tracing, HTTP API and an agent
+loop. Standard-library Python; no runtime dependencies.
 
-> Status: alpha reference implementation. No runtime dependencies. Ships the
-> governance layer only — connectors, SSO and a web UI are integration work and
-> deliberately out of scope.
+> Status: alpha. Zero runtime dependencies is a hard constraint: a governance
+> layer that cannot be installed into an air-gapped build is not a governance
+> layer. Everything below is implemented and covered by tests.
 
 ---
 
@@ -109,6 +111,53 @@ why the slow loop is not optional.
 
 ---
 
+## What is in the box
+
+Every module is independent and tested on its own; `le` is the operator surface
+over all of them.
+
+| Module | What it does | Why it exists |
+|---|---|---|
+| `lifecycle` | effective windows, supersede chains, staleness decay, retirement | the corpus drifts away from the truth |
+| `monitor` | per-library rolling window vs pinned baseline; `stale_truth` alert | nobody notices until users complain |
+| `feedback` | bounded chunk re-weighting + accepted pairs become eval cases | a wrong answer must not repeat |
+| `access` | four roles, tenant isolation, scoped API keys, audit | a role that leaks across tenants is not a role |
+| `memory` | active / superseded / archived / pending, expiry, review, forget | two contradictory facts must not coexist |
+| `governance` | duplicate titles, dangling supersedes, retirement candidates | the silent failure modes |
+| `parsers` | docx / pptx / xlsx / csv / html / json / epub, stdlib only | companies do not store knowledge in .md |
+| `connectors` | local, RSS, web, sitemap; incremental with prune | a deleted source must leave the index |
+| `wiki` | deterministic pages, citations, dead links, rollback | a wiki that invents facts is worse than none |
+| `queue` | durable jobs, retries, backoff, crash recovery | ingestion outlives the request |
+| `scheduler` | periodic jobs without burst on recovery | "nightly" should not need a human |
+| `tracing` | span trees, token accounting, wired into retrieval | averages hide the regressing stage |
+| `evalmetrics` | P@k, nDCG, MRR, MAP, BLEU, ROUGE-L, gates | an eval that cannot fail a build is a dashboard |
+| `backends` | one retrieval contract, memory + SQLite | swapping storage should be bounded |
+| `agent` | bounded tool loop with read-only policy | the model must not invent a tool |
+| `mcp` | eight tools over stdio JSON-RPC | MCP is the primary interface |
+| `service` | HTTP API with per-route authorisation | everything else needs to call it |
+| `storage` | content-addressed blobs, dedup, integrity | originals outlive extracted text |
+| `doctor` | integrity, orphans, missing ACL, stuck jobs, stale connectors | these failures are silent |
+| `portability` | per-tenant export/import | data belongs to the tenant |
+| `deploy` | Dockerfile, compose, Helm chart | deployment is a feature |
+
+### CLI at a glance
+
+```
+le demo                      reproduce the 85% -> 60% incident
+le put / supersede / chain    write and inspect document lineage
+le scan / retire              lifecycle findings and explicit retirement
+le monitor / evaluate         live drift, offline IR metrics with a gate
+le sync <kind> <target>       local / rss / web / sitemap, incremental
+le wiki build|pages|show      compiled pages, history, rollback
+le queue / schedule           durable jobs and periodic work
+le memory remember|recall     facts with supersede, expiry and review
+le member / key / perm        roles, API keys, permission matrix
+le serve / mcp                HTTP API or MCP stdio
+le agent "question"           bounded tool-using loop
+le backend / blob             pluggable retrieval backend, blob storage
+le doctor / export / import   self-check and tenant portability
+```
+
 ## Permission and truth are part of the query
 
 ```python
@@ -201,7 +250,8 @@ heuristic is how a governance tool loses someone's work.
 
 - **Not a vector database.** `HashEmbedder` is a placeholder for tests; plug in
   a real one. The governance layer is the point.
-- **Not a connector platform.** Confluence/Jira/飞书 ingest is integration work.
+- **Not every enterprise connector.** Local, RSS, web and sitemap ship; Confluence/
+  Jira/飞书 need per-vendor APIs and are separate adapters.
 - **Not multi-tenant SaaS.** Tenant isolation is enforced in every query, but
   provisioning, SSO and quotas are out of scope.
 - **Not a judge you should trust blindly.** Faithfulness scores are a signal
