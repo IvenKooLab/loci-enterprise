@@ -19,13 +19,58 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import feedback as feedback_mod
-from . import governance, lifecycle, monitor as monitor_mod
+from . import governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from .retrieval import RetrievalConfig, Retriever
 from .store import Document, Store
 
 
 def _store(args) -> Store:
     return Store(args.db)
+
+
+def _memory(args) -> memory_mod.MemoryStore:
+    return memory_mod.MemoryStore(_store(args))
+
+
+def cmd_memory(args) -> int:
+    mem = _memory(args)
+    cmd = args.memory_cmd
+    if cmd == "remember":
+        res = mem.remember(args.tenant, args.subject, args.key, args.value,
+                           source=args.source, ttl_days=args.ttl_days,
+                           actor=args.actor, requires_review=args.review)
+        print(json.dumps({"status": res.status, "id": res.item.id if res.item else None,
+                          "detail": res.detail}, ensure_ascii=False))
+        return 0
+    if cmd == "recall":
+        for item in mem.recall(args.tenant, args.subject, args.key or None):
+            print(f"{item.key:<18} {item.value:<40} {item.source:<10} {item.updated_at}")
+        return 0
+    if cmd == "pending":
+        for item in mem.pending(args.tenant):
+            print(f"{item.id}  {item.subject_id:<12} {item.key:<16} {item.value:<38} {item.source}")
+        return 0
+    if cmd == "approve":
+        item = mem.approve(args.memory_id, actor=args.actor)
+        print(f"approved {args.memory_id}" if item else "not pending")
+        return 0
+    if cmd == "reject":
+        print("rejected" if mem.reject(args.memory_id, actor=args.actor,
+                                       reason=args.reason) else "not pending")
+        return 0
+    if cmd == "history":
+        for item in mem.history(args.tenant, args.subject, args.key):
+            print(f"{item.status:<11} {item.value:<40} {item.created_at} "
+                  f"{'(by ' + str(item.superseded_by)[:8] + ')' if item.superseded_by else ''}")
+        return 0
+    if cmd == "forget":
+        print(json.dumps(mem.forget(args.tenant, args.subject, key=args.key or None,
+                                    actor=args.actor), ensure_ascii=False))
+        return 0
+    if cmd == "capacity":
+        print(json.dumps(mem.capacity(args.tenant, args.subject), ensure_ascii=False))
+        return 0
+    raise SystemExit(f"unknown memory command {cmd}")
 
 
 def _access(args) -> access_mod.AccessControl:
@@ -206,6 +251,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default="./le.db")
     p.add_argument("--tenant", default="default")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    q = sub.add_parser("memory", help="memory items: remember | recall | pending | approve | reject | history | forget | capacity")
+    q.add_argument("memory_cmd",
+                   choices=["remember", "recall", "pending", "approve", "reject",
+                            "history", "forget", "capacity"])
+    q.add_argument("subject", nargs="?", default="")
+    q.add_argument("key", nargs="?", default="")
+    q.add_argument("value", nargs="?", default="")
+    q.add_argument("--memory-id", dest="memory_id", default="")
+    q.add_argument("--source", default="agent")
+    q.add_argument("--ttl-days", type=float, default=None)
+    q.add_argument("--review", action="store_true",
+                   help="hold as pending until approved")
+    q.add_argument("--reason", default="")
+    q.add_argument("--actor", default="cli")
+    q.set_defaults(func=cmd_memory)
 
     q = sub.add_parser("member", help="tenant membership: grant | revoke | list")
     q.add_argument("member_cmd", choices=["grant", "revoke", "list"])
