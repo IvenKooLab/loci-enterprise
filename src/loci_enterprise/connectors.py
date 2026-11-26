@@ -226,6 +226,84 @@ class SitemapConnector(Connector):
         return pages
 
 
+class JsonApiConnector(Connector):
+    """A REST endpoint that returns JSON, mapped by configuration.
+
+    Most enterprise systems expose "list of records as JSON" behind an API:
+    Confluence pages, a Feishu document list, an internal CMS. Writing a
+    connector per vendor is mostly repetition of the same five decisions, so
+    this one makes them configuration:
+
+        url          GET endpoint
+        items_path   dot path to the array ("" = the response IS the array)
+        id_field / title_field / body_field
+        headers      auth headers (caller supplies; never logged)
+        max_items    hard cap so a misconfigured path cannot ingest a database
+
+    Field values may themselves be dot paths, so ``content.body`` works.
+    """
+
+    def __init__(self, url: str, *, name: str = "api", items_path: str = "items",
+                 id_field: str = "id", title_field: str = "title",
+                 body_field: str = "body", headers: dict | None = None,
+                 max_items: int = 1000):
+        self.url = url
+        self.name = name
+        self.source_key = f"api:{url}"
+        self.items_path = items_path
+        self.id_field = id_field
+        self.title_field = title_field
+        self.body_field = body_field
+        self.headers = headers or {}
+        self.max_items = max_items
+
+    @staticmethod
+    def _dig(obj, path: str):
+        cur = obj
+        for part in [p for p in (path or "").split(".") if p]:
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            elif isinstance(cur, list) and part.isdigit():
+                idx = int(part)
+                cur = cur[idx] if idx < len(cur) else None
+            else:
+                return None
+        return cur
+
+    def list(self) -> list[SourceDoc]:
+        req = urllib.request.Request(self.url, headers={"User-Agent": UA,
+                                                        **self.headers})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            # file:// responses carry no status; urllib has already raised for
+            # a real HTTP error by this point
+            status = getattr(resp, "status", None)
+            if status is not None and status >= 400:
+                raise ValueError(f"{self.url}: HTTP {status}")
+            payload = json.loads(resp.read(16 << 20).decode("utf-8", errors="replace"))
+        items = self._dig(payload, self.items_path)
+        if items is None and not self.items_path:
+            items = payload
+        if not isinstance(items, list):
+            raise ValueError(f"{self.url}: items_path {self.items_path!r} did not "
+                             f"yield a list (got {type(items).__name__})")
+        out: list[SourceDoc] = []
+        for raw in items[: self.max_items]:
+            if not isinstance(raw, dict):
+                continue
+            ident = self._dig(raw, self.id_field)
+            title = self._dig(raw, self.title_field)
+            body = self._dig(raw, self.body_field)
+            if body is None:
+                body = ""
+            if not isinstance(body, str):
+                body = json.dumps(body, ensure_ascii=False)
+            out.append(SourceDoc(key=str(ident or title or len(out)),
+                                 title=str(title or ident or "(untitled)"),
+                                 text=body,
+                                 meta={"source": self.url}))
+        return out
+
+
 # -------------------------------------------------------------------- sync
 @dataclass
 class SyncReport:

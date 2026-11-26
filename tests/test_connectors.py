@@ -197,3 +197,48 @@ def test_sitemap_expands_to_pages(tmp_path):
 </urlset>""", encoding="utf-8")
     docs = connectors.SitemapConnector(sm.as_uri()).list()
     assert len(docs) == 1 and "正文" in docs[0].text
+
+
+# --------------------------------------------------------------- json api
+def test_json_api_connector_maps_configured_fields(tmp_path):
+    payload = {"data": {"pages": [
+        {"page_id": "p1", "name": "差旅政策", "content": {"body": "住宿上限 800 元"}},
+        {"page_id": "p2", "name": "年假", "content": {"body": "15 天"}},
+    ]}}
+    p = tmp_path / "api.json"
+    p.write_text(json.dumps(payload), encoding="utf-8")
+    conn = connectors.JsonApiConnector(
+        p.as_uri(), items_path="data.pages", id_field="page_id",
+        title_field="name", body_field="content.body")
+    docs = conn.list()
+    assert [d.key for d in docs] == ["p1", "p2"]
+    assert docs[0].title == "差旅政策" and "800" in docs[0].text
+
+
+def test_json_api_connector_rejects_a_non_list_items_path(tmp_path):
+    p = tmp_path / "bad.json"
+    p.write_text(json.dumps({"items": {"not": "a list"}}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        connectors.JsonApiConnector(p.as_uri()).list()
+
+
+def test_json_api_connector_honours_max_items(tmp_path):
+    p = tmp_path / "many.json"
+    p.write_text(json.dumps({"items": [{"id": i, "body": "x"} for i in range(10)]}),
+                 encoding="utf-8")
+    assert len(connectors.JsonApiConnector(p.as_uri(), max_items=3).list()) == 3
+
+
+def test_json_api_connector_accepts_a_bare_array(tmp_path):
+    p = tmp_path / "arr.json"
+    p.write_text(json.dumps([{"id": "a", "title": "A", "body": "text"}]),
+                 encoding="utf-8")
+    docs = connectors.JsonApiConnector(p.as_uri(), items_path="").list()
+    assert docs[0].key == "a"
+
+
+def test_json_api_connector_serialises_non_string_bodies(tmp_path):
+    p = tmp_path / "obj.json"
+    p.write_text(json.dumps({"items": [{"id": "a", "body": {"nested": 1}}]}),
+                 encoding="utf-8")
+    assert '"nested": 1' in connectors.JsonApiConnector(p.as_uri()).list()[0].text

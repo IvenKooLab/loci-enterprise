@@ -455,6 +455,15 @@ def cmd_sync(args) -> int:
         conn = connectors_mod.WebPageConnector([args.target], name=args.name or "web")
     elif kind == "sitemap":
         conn = connectors_mod.SitemapConnector(args.target, name=args.name or "sitemap")
+    elif kind == "api":
+        headers = {}
+        for pair in args.header or []:
+            k, _, v = pair.partition(":")
+            headers[k.strip()] = v.strip()
+        conn = connectors_mod.JsonApiConnector(
+            args.target, name=args.name or "api", items_path=args.items_path,
+            id_field=args.id_field, title_field=args.title_field,
+            body_field=args.body_field, headers=headers)
     else:
         raise SystemExit(f"unknown source kind {kind}")
     report = connectors_mod.SyncEngine(store).sync(
@@ -762,11 +771,17 @@ def build_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_wiki)
 
     q = sub.add_parser("sync", help="sync a data source into a library")
-    q.add_argument("kind", choices=["local", "rss", "web", "sitemap"])
+    q.add_argument("kind", choices=["local", "rss", "web", "sitemap", "api"])
     q.add_argument("target")
     q.add_argument("--library", default="default")
     q.add_argument("--name", default="")
     q.add_argument("--acl", default="public")
+    q.add_argument("--items-path", dest="items_path", default="items")
+    q.add_argument("--id-field", dest="id_field", default="id")
+    q.add_argument("--title-field", dest="title_field", default="title")
+    q.add_argument("--body-field", dest="body_field", default="body")
+    q.add_argument("--header", action="append", default=[],
+                   help="extra request header, e.g. --header 'Authorization: Bearer x'")
     q.set_defaults(func=cmd_sync)
 
     q = sub.add_parser("sources", help="show connector watermarks")
