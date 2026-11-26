@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import feedback as feedback_mod
+from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from .retrieval import RetrievalConfig, Retriever
 from .store import Document, Store
@@ -154,6 +155,39 @@ def cmd_chain(args) -> int:
         mark = "*" if cur and item["path"] == cur["path"] else " "
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
+    return 0
+
+
+def cmd_sync(args) -> int:
+    """Pull one source into a library; ids, updates and removals are reconciled."""
+    store = _store(args)
+    kind = args.kind
+    if kind == "local":
+        conn = connectors_mod.LocalDirConnector(args.target, name=args.name or "local")
+    elif kind == "rss":
+        conn = connectors_mod.RssConnector(args.target, name=args.name or "rss")
+    elif kind == "web":
+        conn = connectors_mod.WebPageConnector([args.target], name=args.name or "web")
+    elif kind == "sitemap":
+        conn = connectors_mod.SitemapConnector(args.target, name=args.name or "sitemap")
+    else:
+        raise SystemExit(f"unknown source kind {kind}")
+    report = connectors_mod.SyncEngine(store).sync(
+        conn, tenant_id=args.tenant, library=args.library,
+        acl=[a for a in args.acl.split(",") if a], actor=f"sync:{kind}")
+    print(json.dumps(report.as_dict(), ensure_ascii=False))
+    return 0 if not report.errors else 1
+
+
+def cmd_sources(args) -> int:
+    state = connectors_mod.SyncEngine(_store(args)).state()
+    if not state:
+        print("(no source has been synced yet)")
+        return 0
+    print(f"{'source':<40} {'library':<12} {'items':>6}  last sync")
+    for row in state:
+        print(f"{row['source_key'][:39]:<40} {row['library']:<12} "
+              f"{row['items']:>6}  {row['last_sync']}")
     return 0
 
 
@@ -355,6 +389,17 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("sync", help="sync a data source into a library")
+    q.add_argument("kind", choices=["local", "rss", "web", "sitemap"])
+    q.add_argument("target")
+    q.add_argument("--library", default="default")
+    q.add_argument("--name", default="")
+    q.add_argument("--acl", default="public")
+    q.set_defaults(func=cmd_sync)
+
+    q = sub.add_parser("sources", help="show connector watermarks")
+    q.set_defaults(func=cmd_sources)
 
     q = sub.add_parser("scan", help="find documents that can no longer be trusted")
     q.add_argument("--library")
