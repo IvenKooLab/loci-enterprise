@@ -130,6 +130,7 @@ class RetrievalConfig:
     hybrid: bool = True
     apply_lifecycle: bool = True
     apply_feedback: bool = True
+    exclude_superseded: bool = True
     min_score: float = 0.0
 
 
@@ -176,6 +177,10 @@ class Retriever:
                 kept.append(r)
                 continue
             if verdict.weight <= 0.0:
+                continue
+            if cfg.exclude_superseded and verdict.status == "superseded":
+                # a replaced policy must never be quoted by an agent; history
+                # stays readable through the lifecycle commands instead
                 continue
             weights[r["id"]] = (verdict.weight, verdict.reason)
             kept.append(r)

@@ -20,6 +20,7 @@ from pathlib import Path
 from . import access as access_mod
 from . import feedback as feedback_mod
 from . import agent as agent_mod
+from . import mcp as mcp_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
@@ -160,6 +161,13 @@ def cmd_chain(args) -> int:
         mark = "*" if cur and item["path"] == cur["path"] else " "
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
+    return 0
+
+
+def cmd_mcp(args) -> int:
+    """Run the MCP server over stdio (one JSON-RPC message per line)."""
+    mcp_mod.MCPServer(_store(args), tenant_id=args.tenant,
+                      principals=[args.principal]).serve()
     return 0
 
 
@@ -564,6 +572,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("mcp", help="serve the knowledge base over MCP (stdio)")
+    q.add_argument("--principal", default="public")
+    q.set_defaults(func=cmd_mcp)
 
     q = sub.add_parser("agent", help="answer a question with a tool-using loop")
     q.add_argument("question")
