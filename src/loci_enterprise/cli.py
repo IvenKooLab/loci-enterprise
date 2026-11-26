@@ -27,6 +27,7 @@ from . import storage as storage_mod
 from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
+from . import chunkers as chunkers_mod
 from . import doctor as doctor_mod
 from . import graph as graph_mod
 from . import migrations as migrations_mod
@@ -170,6 +171,17 @@ def cmd_chain(args) -> int:
         mark = "*" if cur and item["path"] == cur["path"] else " "
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
+    return 0
+
+
+def cmd_rechunk(args) -> int:
+    report = chunkers_mod.rebuild_library(
+        _store(args), args.tenant, args.library, args.strategy,
+        **({"child_size": args.child_size, "overlap": args.overlap}
+           if args.strategy == "parent-child" else
+           {"size": args.size, "overlap": args.overlap}
+           if args.strategy == "fixed" else {}))
+    print(json.dumps(report, ensure_ascii=False))
     return 0
 
 
@@ -752,6 +764,14 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("rechunk", help="rebuild a library with a chunking strategy")
+    q.add_argument("--library", required=True)
+    q.add_argument("--strategy", choices=list(chunkers_mod.STRATEGIES), default="heading")
+    q.add_argument("--size", type=int, default=700)
+    q.add_argument("--child-size", dest="child_size", type=int, default=300)
+    q.add_argument("--overlap", type=int, default=60)
+    q.set_defaults(func=cmd_rechunk)
 
     q = sub.add_parser("graph", help="knowledge graph: build | stats | neighbors | path | subgraph | export")
     q.add_argument("graph_cmd",
