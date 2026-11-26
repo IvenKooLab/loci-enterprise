@@ -29,6 +29,7 @@ from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import doctor as doctor_mod
 from . import migrations as migrations_mod
+from . import notify as notify_mod
 from . import portability as portability_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from . import providers as providers_mod
@@ -169,6 +170,27 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_notify(args) -> int:
+    if args.notify_cmd == "test":
+        n = notify_mod.WebhookNotifier(args.url, fmt=args.format)
+        ok = n.send(notify_mod.Message("loci-enterprise test",
+                                       "If you can read this, the channel works.",
+                                       severity="info"))
+        print("delivered" if ok else "delivery failed")
+        return 0 if ok else 1
+    if args.notify_cmd == "doctor":
+        report = doctor_mod.run(_store(args), tenant_id=args.tenant)
+        msgs = notify_mod.from_doctor(report)
+        if not msgs:
+            print("nothing to report")
+            return 0
+        notifiers = [notify_mod.WebhookNotifier(args.url, fmt=args.format)]
+        for m in msgs:
+            print(json.dumps(notify_mod.broadcast(notifiers, m), ensure_ascii=False))
+        return 0
+    raise SystemExit(f"unknown notify command {args.notify_cmd}")
 
 
 def cmd_migrate(args) -> int:
@@ -698,6 +720,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("notify", help="send alerts to a webhook: test | doctor")
+    q.add_argument("notify_cmd", choices=["test", "doctor"])
+    q.add_argument("--url", default="")
+    q.add_argument("--format", choices=["slack", "feishu", "wecom", "generic"],
+                   default="slack")
+    q.set_defaults(func=cmd_notify)
 
     q = sub.add_parser("migrate", help="schema migrations: status | up")
     q.add_argument("migrate_cmd", choices=["status", "up"])
