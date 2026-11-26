@@ -28,6 +28,7 @@ from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import doctor as doctor_mod
+from . import migrations as migrations_mod
 from . import portability as portability_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from . import providers as providers_mod
@@ -170,6 +171,19 @@ def cmd_chain(args) -> int:
     return 0
 
 
+def cmd_migrate(args) -> int:
+    store = _store(args)
+    if args.migrate_cmd == "status":
+        print(json.dumps(migrations_mod.status(store), ensure_ascii=False))
+        return 0
+    done = migrations_mod.apply_all(store)
+    for row in done:
+        print(f"applied v{row['version']}: {row['name']}")
+    if not done:
+        print("already up to date")
+    return 0
+
+
 def cmd_export(args) -> int:
     info = portability_mod.save_export(_store(args), args.tenant, args.out)
     print(json.dumps(info, ensure_ascii=False))
@@ -253,6 +267,7 @@ def cmd_schedule(args) -> int:
 def cmd_serve(args) -> int:
     """Run the HTTP API until interrupted."""
     store = _store(args)
+    migrations_mod.apply_all(store)          # upgrade before serving, or fail loudly
     server = service_mod.serve(store, args.host, args.port,
                                allow_anonymous=args.allow_anonymous)
     print(f"loci-enterprise listening on http://{args.host}:"
@@ -683,6 +698,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("migrate", help="schema migrations: status | up")
+    q.add_argument("migrate_cmd", choices=["status", "up"])
+    q.set_defaults(func=cmd_migrate)
 
     q = sub.add_parser("export", help="export one tenant's data as JSON")
     q.add_argument("out")
