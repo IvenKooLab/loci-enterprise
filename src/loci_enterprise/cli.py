@@ -17,6 +17,7 @@ import json
 import sys
 from pathlib import Path
 
+from . import access as access_mod
 from . import feedback as feedback_mod
 from . import governance, lifecycle, monitor as monitor_mod
 from .retrieval import RetrievalConfig, Retriever
@@ -25,6 +26,54 @@ from .store import Document, Store
 
 def _store(args) -> Store:
     return Store(args.db)
+
+
+def _access(args) -> access_mod.AccessControl:
+    return access_mod.AccessControl(_store(args))
+
+
+def cmd_member(args) -> int:
+    ac = _access(args)
+    if args.member_cmd == "grant":
+        ac.grant(args.tenant, args.user, args.role, actor=args.actor)
+        print(f"granted {args.user} {args.role} in {args.tenant}")
+    elif args.member_cmd == "revoke":
+        print("revoked" if ac.revoke(args.tenant, args.user, actor=args.actor)
+              else "no such member")
+    else:
+        for row in ac.members(args.tenant):
+            print(f"{row['user_id']:<24} {row['role']:<8} since {row['created_at']}")
+    return 0
+
+
+def cmd_key(args) -> int:
+    ac = _access(args)
+    if args.key_cmd == "issue":
+        issued = ac.issue_key(args.tenant, args.name, role=args.role,
+                              scopes=[s for s in args.scopes.split(",") if s],
+                              expires_in_days=args.expires_in_days, actor=args.actor)
+        print("Store this token now — it is not shown again:")
+        print(issued.token)
+    elif args.key_cmd == "revoke":
+        print("revoked" if ac.revoke_key(args.tenant, args.key_id, actor=args.actor)
+              else "no such key")
+    else:
+        for row in ac.keys(args.tenant):
+            state = "revoked" if row["revoked_at"] else "active"
+            print(f"{row['id']:<18} {row['name']:<16} {row['role']:<8} "
+                  f"{row['scopes']:<14} {state}")
+    return 0
+
+
+def cmd_perm(args) -> int:
+    matrix = _access(args).matrix()
+    roles = list(matrix)
+    actions = list(next(iter(matrix.values())))
+    print("role".ljust(10) + "".join(a.ljust(9) for a in actions))
+    for role in roles:
+        print(role.ljust(10) + "".join(
+            ("yes" if matrix[role][a] else "-").ljust(9) for a in actions))
+    return 0
 
 
 def cmd_put(args) -> int:
@@ -157,6 +206,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default="./le.db")
     p.add_argument("--tenant", default="default")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    q = sub.add_parser("member", help="tenant membership: grant | revoke | list")
+    q.add_argument("member_cmd", choices=["grant", "revoke", "list"])
+    q.add_argument("user", nargs="?", default="")
+    q.add_argument("role", nargs="?", default="viewer", choices=list(access_mod.ROLE_LEVELS))
+    q.add_argument("--actor", default="cli")
+    q.set_defaults(func=cmd_member)
+
+    q = sub.add_parser("key", help="API keys: issue | revoke | list")
+    q.add_argument("key_cmd", choices=["issue", "revoke", "list"])
+    q.add_argument("name", nargs="?", default="")
+    q.add_argument("--role", default="viewer", choices=list(access_mod.ROLE_LEVELS))
+    q.add_argument("--scopes", default="read", help="comma-separated: read,write,admin,delete")
+    q.add_argument("--expires-in-days", type=float, default=None)
+    q.add_argument("--key-id", default="")
+    q.add_argument("--actor", default="cli")
+    q.set_defaults(func=cmd_key)
+
+    q = sub.add_parser("perm", help="print the role x action matrix")
+    q.set_defaults(func=cmd_perm)
 
     q = sub.add_parser("put", help="write a document (creates or updates)")
     q.add_argument("path")
