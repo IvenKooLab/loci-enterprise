@@ -1,0 +1,33 @@
+replicaCount: 1
+
+image:
+  repository: loci-enterprise
+  tag: local
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8971
+
+# The HTTP API has no built-in TLS or anonymous mode in production: put it
+# behind an ingress that terminates TLS, and hand keys out through a secret.
+ingress:
+  enabled: false
+  className: ""
+  host: loci.example.internal
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Extra environment variables (for example a proxy for outbound connectors)
+extraEnv: []
