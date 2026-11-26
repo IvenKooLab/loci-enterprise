@@ -19,9 +19,11 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import feedback as feedback_mod
+from . import agent as agent_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
+from . import providers as providers_mod
 from . import queue as queue_mod
 from . import wiki as wiki_mod
 from .retrieval import RetrievalConfig, Retriever
@@ -159,6 +161,49 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_agent(args) -> int:
+    """Answer a question with a tool-using loop over the knowledge base."""
+    store = _store(args)
+    retriever = Retriever(store, config=RetrievalConfig(top_k=5))
+
+    def search(query, principals, library):
+        hits = retriever.search(query, tenant_id=args.tenant,
+                                principals=principals, library=library)
+        return [{"path": h.path, "text": h.text} for h in hits]
+
+    def get_doc(path):
+        doc = store.get_document(args.tenant, args.library, path)
+        return doc.body if doc else f"(no document at {path})"
+
+    registry = agent_mod.knowledge_tools(search, get_doc)
+    try:
+        provider = providers_mod.deepseek(model=args.model or None)
+    except providers_mod.ProviderError as exc:
+        print(f"{exc}. Set DEEPSEEK_API_KEY (or use --model with an "
+              f"OpenAI-compatible endpoint via the library).", file=sys.stderr)
+        return 2
+    tracer = None
+    if args.trace:
+        from .tracing import Tracer
+        tracer = Tracer(path=args.trace)
+        tracer.start_trace("agent", question=args.question[:80])
+    result = agent_mod.Agent(provider, registry, max_steps=args.max_steps,
+                             tracer=tracer).run(
+        args.question,
+        agent_mod.AgentContext(tenant_id=args.tenant, principals=[args.principal],
+                               library=args.library, read_only=True))
+    print(result.answer or "(no answer)")
+    if result.citations:
+        print("\nsources: " + ", ".join(result.citations))
+    if args.verbose:
+        for step in result.steps:
+            print(f"  {step.kind:<7} {step.tool:<18} {step.ms:7.1f} ms "
+                  f"{step.error or step.observation[:80]}")
+    if tracer:
+        tracer.end_trace()
+    return 0 if result.stopped == "answer" else 1
 
 
 def cmd_backend(args) -> int:
@@ -519,6 +564,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("agent", help="answer a question with a tool-using loop")
+    q.add_argument("question")
+    q.add_argument("--library", default="default")
+    q.add_argument("--principal", default="public")
+    q.add_argument("--model", default="")
+    q.add_argument("--max-steps", type=int, default=8)
+    q.add_argument("--trace", default="")
+    q.add_argument("--verbose", action="store_true")
+    q.set_defaults(func=cmd_agent)
 
     q = sub.add_parser("backend", help="pluggable retrieval backend: rebuild | stats | search")
     q.add_argument("backend_cmd", choices=["rebuild", "stats", "search"])
