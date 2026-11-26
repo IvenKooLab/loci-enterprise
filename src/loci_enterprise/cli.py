@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import feedback as feedback_mod
+from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from . import queue as queue_mod
@@ -157,6 +158,35 @@ def cmd_chain(args) -> int:
         mark = "*" if cur and item["path"] == cur["path"] else " "
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
+    return 0
+
+
+def cmd_backend(args) -> int:
+    """Rebuild or query a pluggable retrieval backend from the document store."""
+    be = (backends_mod.MemoryBackend() if args.kind == "memory"
+          else backends_mod.SQLiteBackend(args.path))
+    if args.backend_cmd == "rebuild":
+        from .retrieval import HashEmbedder
+        store = _store(args)
+        embedder = HashEmbedder()
+        records = []
+        for chunk in store.visible_chunks(args.tenant, [args.principal]):
+            records.append(backends_mod.IndexRecord(
+                chunk_id=chunk["id"], doc_id=chunk["doc_id"],
+                tenant_id=args.tenant, library=chunk["library"],
+                text=chunk["text"], vector=embedder.embed(chunk["text"]),
+                acl=[args.principal], status=chunk["status"]))
+        be.upsert(records)
+        print(json.dumps(be.stats(args.tenant), ensure_ascii=False))
+        return 0
+    if args.backend_cmd == "search":
+        hits = be.search(backends_mod.Query(
+            text=args.query, tenant_id=args.tenant, principals=[args.principal],
+            vector=None, top_k=args.top_k))
+        for h in hits:
+            print(f"{h.score:.5f}  {h.chunk_id}  ({h.doc_id})")
+        return 0
+    print(json.dumps(be.stats(args.tenant), ensure_ascii=False))
     return 0
 
 
@@ -489,6 +519,15 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("backend", help="pluggable retrieval backend: rebuild | stats | search")
+    q.add_argument("backend_cmd", choices=["rebuild", "stats", "search"])
+    q.add_argument("--kind", choices=["memory", "sqlite"], default="sqlite")
+    q.add_argument("--path", default="./vectors.db")
+    q.add_argument("--principal", default="public")
+    q.add_argument("--query", default="")
+    q.add_argument("--top-k", type=int, default=5)
+    q.set_defaults(func=cmd_backend)
 
     q = sub.add_parser("queue", help="jobs: enqueue | run | stats | list | cancel | reclaim")
     q.add_argument("queue_cmd",
