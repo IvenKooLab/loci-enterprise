@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 from . import lifecycle
@@ -134,14 +135,29 @@ class RetrievalConfig:
 
 class Retriever:
     def __init__(self, store: Store, *, embedder=None, config: RetrievalConfig | None = None,
-                 feedback_scores: dict[str, float] | None = None):
+                 feedback_scores: dict[str, float] | None = None, tracer=None):
         self.store = store
         self.embedder = embedder or HashEmbedder()
         self.config = config or RetrievalConfig()
         self.feedback_scores = feedback_scores or {}
+        self.tracer = tracer
+
+    def _span(self, name: str, **attrs):
+        return self.tracer.span(name, **attrs) if self.tracer else nullcontext()
 
     def search(self, query: str, *, tenant_id: str, principals: list[str],
                library: str | None = None, on=None) -> list[Hit]:
+        if self.tracer:
+            with self.tracer.span("search", query=query[:80]) as root:
+                hits = self._search(query, tenant_id=tenant_id,
+                                    principals=principals, library=library, on=on)
+                root.attrs["hits"] = len(hits)
+                return hits
+        return self._search(query, tenant_id=tenant_id, principals=principals,
+                            library=library, on=on)
+
+    def _search(self, query: str, *, tenant_id: str, principals: list[str],
+                library: str | None = None, on=None) -> list[Hit]:
         cfg = self.config
         rows = self.store.visible_chunks(tenant_id, principals, library)
         if not rows:
@@ -168,27 +184,30 @@ class Retriever:
 
         # ---- lexical over the visible corpus only -------------------------
         docs = [r["text"] for r in kept]
-        lex = bm25_scores(docs, query)
+        with self._span("bm25", docs=len(docs)):
+            lex = bm25_scores(docs, query)
         lex_norm = _minmax(lex)
 
         # ---- vector -------------------------------------------------------
         if cfg.hybrid:
-            qv = self.embedder.embed(query)
-            vec = _minmax([cosine(qv, self.embedder.embed(d)) for d in docs])
+            with self._span("vector", docs=len(docs)):
+                qv = self.embedder.embed(query)
+                vec = _minmax([cosine(qv, self.embedder.embed(d)) for d in docs])
         else:
             vec = [0.0] * len(docs)
 
         # ---- RRF over the two ranked lists --------------------------------
-        lex_rank = _ranks(lex)
-        vec_rank = _ranks(vec)
-        fused: list[tuple[dict, float, float, float]] = []
-        for i, r in enumerate(kept):
-            s = 0.0
-            if lex[i] > 0:
-                s += 1.0 / (cfg.rrf_k + lex_rank[i] + 1)
-            if cfg.hybrid and vec[i] > 0:
-                s += 1.0 / (cfg.rrf_k + vec_rank[i] + 1)
-            fused.append((r, s, lex_norm[i], vec[i]))
+        with self._span("fuse", kept=len(kept)):
+            lex_rank = _ranks(lex)
+            vec_rank = _ranks(vec)
+            fused: list[tuple[dict, float, float, float]] = []
+            for i, r in enumerate(kept):
+                score = 0.0
+                if lex[i] > 0:
+                    score += 1.0 / (cfg.rrf_k + lex_rank[i] + 1)
+                if cfg.hybrid and vec[i] > 0:
+                    score += 1.0 / (cfg.rrf_k + vec_rank[i] + 1)
+                fused.append((r, score, lex_norm[i], vec[i]))
 
         # ---- lifecycle + authority + feedback weights ---------------------
         auth = {r["id"]: (r.get("authority") or 1.0) for r in kept}
