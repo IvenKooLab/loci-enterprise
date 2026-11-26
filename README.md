@@ -140,6 +140,7 @@ over all of them.
 | `doctor` | integrity, orphans, missing ACL, stuck jobs, stale connectors | these failures are silent |
 | `portability` | per-tenant export/import | data belongs to the tenant |
 | `migrations` | numbered, transactional schema upgrades | a deployed schema has to change safely |
+| `notify` | Slack / Feishu / WeCom / generic webhooks with severity thresholds | an alert nobody receives is a log line |
 | `deploy` | Dockerfile, compose, Helm chart | deployment is a feature |
 
 ### CLI at a glance
@@ -159,6 +160,7 @@ le agent "question"           bounded tool-using loop
 le backend / blob             pluggable retrieval backend, blob storage
 le migrate status|up          schema upgrades
 le doctor / export / import   self-check and tenant portability
+le notify test|doctor         deliver alerts to Slack / Feishu / WeCom
 ```
 
 ## Permission and truth are part of the query
