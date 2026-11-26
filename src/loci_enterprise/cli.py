@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import feedback as feedback_mod
-from . import governance, lifecycle, memory as memory_mod, monitor as monitor_mod
+from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from .retrieval import RetrievalConfig, Retriever
 from .store import Document, Store
 
@@ -195,6 +195,46 @@ def cmd_retire(args) -> int:
     return 0
 
 
+def cmd_evaluate(args) -> int:
+    """IR-metric evaluation against doc-id relevance, with an optional gate."""
+    store = _store(args)
+    retriever = Retriever(store, config=RetrievalConfig(top_k=max(args.k, 10)))
+
+    def search(query, principals, library):
+        hits = retriever.search(query, tenant_id=args.tenant,
+                                principals=principals, library=library)
+        seen, out = set(), []
+        for h in hits:                     # one vote per document, not per chunk
+            if h.path not in seen:
+                seen.add(h.path)
+                out.append(h.path)
+        return out
+
+    cases = evalmetrics.load_cases(args.cases)
+    report = evalmetrics.evaluate(cases, search, k=args.k)
+    if args.save:
+        report.save(args.save)
+    if args.json:
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+    else:
+        for row in report.per_case:
+            print(f"{row['query'][:34]:<36} ranked={row['ranked']}")
+        print()
+        for name, value in report.metrics.items():
+            print(f"  {name:<16} {value:.4f}")
+    if args.baseline:
+        baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        verdict = evalmetrics.gate(report, baseline, tolerance=args.tolerance)
+        for f in verdict["failures"]:
+            print(f"REGRESSION {f['metric']}: {f['baseline']:.4f} -> {f['current']:.4f}",
+                  file=sys.stderr)
+        for w in verdict["warnings"]:
+            print(f"warning {w['metric']}: {w['baseline']:.4f} -> {w['current']:.4f}",
+                  file=sys.stderr)
+        return 0 if verdict["passed"] else 1
+    return 0
+
+
 def cmd_monitor(args) -> int:
     store = _store(args)
     mon = monitor_mod.Monitor(path=args.log)
@@ -329,6 +369,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--dry-run", action="store_true")
     q.add_argument("--apply", dest="dry_run", action="store_false")
     q.set_defaults(func=cmd_retire, dry_run=True)
+
+    q = sub.add_parser("evaluate",
+                       help="IR metrics (P@k, nDCG, MRR, MAP) with a regression gate")
+    q.add_argument("cases")
+    q.add_argument("--k", type=int, default=10)
+    q.add_argument("--json", action="store_true")
+    q.add_argument("--save", default="")
+    q.add_argument("--baseline", default="")
+    q.add_argument("--tolerance", type=float, default=0.02)
+    q.set_defaults(func=cmd_evaluate)
 
     q = sub.add_parser("monitor", help="has retrieval quality moved?")
     q.add_argument("--library", default="default")
