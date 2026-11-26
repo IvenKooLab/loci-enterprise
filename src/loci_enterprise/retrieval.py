@@ -136,12 +136,14 @@ class RetrievalConfig:
 
 class Retriever:
     def __init__(self, store: Store, *, embedder=None, config: RetrievalConfig | None = None,
-                 feedback_scores: dict[str, float] | None = None, tracer=None):
+                 feedback_scores: dict[str, float] | None = None, tracer=None,
+                 reranker=None):
         self.store = store
         self.embedder = embedder or HashEmbedder()
         self.config = config or RetrievalConfig()
         self.feedback_scores = feedback_scores or {}
         self.tracer = tracer
+        self.reranker = reranker
 
     def _span(self, name: str, **attrs):
         return self.tracer.span(name, **attrs) if self.tracer else nullcontext()
@@ -229,6 +231,18 @@ class Retriever:
                            library=r["library"], text=r["text"], status=r["status"],
                            score=s, lexical=lnorm, vector=vscore, reason=reason))
         out.sort(key=lambda h: -h.score)
+        if self.reranker is not None and out:
+            from .rerank import Candidate
+            candidates = [Candidate(id=h.chunk_id, text=h.text, score=h.score)
+                          for h in out]
+            reranked = self.reranker.rerank(query, candidates, top_k=cfg.top_k)
+            by_id = {h.chunk_id: h for h in out}
+            result = []
+            for c in reranked:
+                hit = by_id[c.id]
+                hit.score = c.score
+                result.append(hit)
+            return result
         return out[: cfg.top_k]
 
 
