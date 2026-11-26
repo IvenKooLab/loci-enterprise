@@ -125,8 +125,10 @@ over all of them.
 | `memory` | active / superseded / archived / pending, expiry, review, forget | two contradictory facts must not coexist |
 | `governance` | duplicate titles, dangling supersedes, retirement candidates | the silent failure modes |
 | `parsers` | docx / pptx / xlsx / csv / html / json / epub, stdlib only | companies do not store knowledge in .md |
+| `chunkers` | heading, fixed-window and parent-child strategies | one chunk size cannot fit every corpus |
 | `connectors` | local, RSS, web, sitemap, configurable JSON API; incremental with prune | a deleted source must leave the index |
 | `wiki` | deterministic pages, citations, dead links, rollback | a wiki that invents facts is worse than none |
+| `graph` | wikilinks, supersede lineage, duplicate titles; neighbours/path/subgraph | relationships are invisible in a flat index |
 | `queue` | durable jobs, retries, backoff, crash recovery | ingestion outlives the request |
 | `scheduler` | periodic jobs without burst on recovery | "nightly" should not need a human |
 | `tracing` | span trees, token accounting, wired into retrieval | averages hide the regressing stage |
@@ -152,6 +154,8 @@ le scan / retire              lifecycle findings and explicit retirement
 le monitor / evaluate         live drift, offline IR metrics with a gate
 le sync <kind> <target>       local / rss / web / sitemap, incremental
 le wiki build|pages|show      compiled pages, history, rollback
+le graph build|neighbors      knowledge graph over links and lineage
+le rechunk --strategy ...     rebuild a library with another chunker
 le queue / schedule           durable jobs and periodic work
 le memory remember|recall     facts with supersede, expiry and review
 le member / key / perm        roles, API keys, permission matrix
