@@ -23,6 +23,7 @@ from . import feedback as feedback_mod
 from . import agent as agent_mod
 from . import mcp as mcp_mod
 from . import scheduler as scheduler_mod
+from . import storage as storage_mod
 from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
@@ -165,6 +166,26 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_blob(args) -> int:
+    store_dir = Path(args.blob_root)
+    blobs = storage_mod.LocalBlobStore(store_dir)
+    if args.blob_cmd == "put":
+        blob, _ = storage_mod.store_file(blobs, args.file)
+        print(json.dumps({"digest": blob.digest, "size": blob.size,
+                          "media_type": blob.media_type}, ensure_ascii=False))
+        return 0
+    if args.blob_cmd == "get":
+        data = blobs.get(args.digest)
+        out = Path(args.out) if args.out else Path(args.digest[:12] + ".bin")
+        out.write_bytes(data)
+        print(str(out))
+        return 0
+    if args.blob_cmd == "stats":
+        print(json.dumps(blobs.stats(), ensure_ascii=False))
+        return 0
+    raise SystemExit(f"unknown blob command {args.blob_cmd}")
 
 
 def cmd_schedule(args) -> int:
@@ -626,6 +647,14 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("blob", help="content-addressed blob store: put | get | stats")
+    q.add_argument("blob_cmd", choices=["put", "get", "stats"])
+    q.add_argument("file", nargs="?", default="")
+    q.add_argument("digest", nargs="?", default="")
+    q.add_argument("--blob-root", dest="blob_root", default="./blobs")
+    q.add_argument("--out", default="")
+    q.set_defaults(func=cmd_blob)
 
     q = sub.add_parser("schedule", help="periodic jobs: add | list | remove | enable | disable | tick")
     q.add_argument("schedule_cmd",
