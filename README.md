@@ -125,19 +125,21 @@ over all of them.
 | `memory` | active / superseded / archived / pending, expiry, review, forget | two contradictory facts must not coexist |
 | `governance` | duplicate titles, dangling supersedes, retirement candidates | the silent failure modes |
 | `parsers` | docx / pptx / xlsx / csv / html / json / epub, stdlib only | companies do not store knowledge in .md |
-| `connectors` | local, RSS, web, sitemap; incremental with prune | a deleted source must leave the index |
+| `connectors` | local, RSS, web, sitemap, configurable JSON API; incremental with prune | a deleted source must leave the index |
 | `wiki` | deterministic pages, citations, dead links, rollback | a wiki that invents facts is worse than none |
 | `queue` | durable jobs, retries, backoff, crash recovery | ingestion outlives the request |
 | `scheduler` | periodic jobs without burst on recovery | "nightly" should not need a human |
 | `tracing` | span trees, token accounting, wired into retrieval | averages hide the regressing stage |
 | `evalmetrics` | P@k, nDCG, MRR, MAP, BLEU, ROUGE-L, gates | an eval that cannot fail a build is a dashboard |
 | `backends` | one retrieval contract, memory + SQLite | swapping storage should be bounded |
+| `rerank` | lexical and provider rerankers, fail-open | precision over a small candidate set |
 | `agent` | bounded tool loop with read-only policy | the model must not invent a tool |
 | `mcp` | eight tools over stdio JSON-RPC | MCP is the primary interface |
 | `service` | HTTP API with per-route authorisation | everything else needs to call it |
 | `storage` | content-addressed blobs, dedup, integrity | originals outlive extracted text |
 | `doctor` | integrity, orphans, missing ACL, stuck jobs, stale connectors | these failures are silent |
 | `portability` | per-tenant export/import | data belongs to the tenant |
+| `migrations` | numbered, transactional schema upgrades | a deployed schema has to change safely |
 | `deploy` | Dockerfile, compose, Helm chart | deployment is a feature |
 
 ### CLI at a glance
@@ -155,6 +157,7 @@ le member / key / perm        roles, API keys, permission matrix
 le serve / mcp                HTTP API or MCP stdio
 le agent "question"           bounded tool-using loop
 le backend / blob             pluggable retrieval backend, blob storage
+le migrate status|up          schema upgrades
 le doctor / export / import   self-check and tenant portability
 ```
 
