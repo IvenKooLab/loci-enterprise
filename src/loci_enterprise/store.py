@@ -164,7 +164,12 @@ class Document:
 class Store:
     def __init__(self, path: str | Path = ":memory:"):
         self.path = str(path)
-        self.conn = sqlite3.connect(self.path, isolation_level=None)
+        # The HTTP service and the worker pool share one Store across threads.
+        # SQLite is compiled in serialized mode by default, so a single
+        # connection is safe to share; without this flag every request from a
+        # second thread would raise ProgrammingError instead.
+        self.conn = sqlite3.connect(self.path, isolation_level=None,
+                                    check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
 

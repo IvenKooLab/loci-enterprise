@@ -21,6 +21,7 @@ from . import access as access_mod
 from . import feedback as feedback_mod
 from . import agent as agent_mod
 from . import mcp as mcp_mod
+from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
@@ -161,6 +162,22 @@ def cmd_chain(args) -> int:
         mark = "*" if cur and item["path"] == cur["path"] else " "
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
+    return 0
+
+
+def cmd_serve(args) -> int:
+    """Run the HTTP API until interrupted."""
+    store = _store(args)
+    server = service_mod.serve(store, args.host, args.port,
+                               allow_anonymous=args.allow_anonymous)
+    print(f"loci-enterprise listening on http://{args.host}:"
+          f"{server.server_address[1]}", file=sys.stderr)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
     return 0
 
 
@@ -572,6 +589,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("serve", help="serve the HTTP API")
+    q.add_argument("--host", default="127.0.0.1")
+    q.add_argument("--port", type=int, default=8971)
+    q.add_argument("--allow-anonymous", action="store_true",
+                   help="loopback-only convenience: treat requests without a key as viewers")
+    q.set_defaults(func=cmd_serve)
 
     q = sub.add_parser("mcp", help="serve the knowledge base over MCP (stdio)")
     q.add_argument("--principal", default="public")
