@@ -77,6 +77,15 @@ TOOLS: list[dict[str, Any]] = [
                      "properties": {"subject_id": {"type": "string"},
                                     "key": {"type": "string"},
                                     "include_history": {"type": "boolean"}}}},
+    {"name": "kb_graph",
+     "description": "Knowledge graph over the corpus: neighbours of a node, a path "
+                    "between two nodes, or graph stats (isolated notes, broken links).",
+     "inputSchema": {"type": "object",
+                     "properties": {"action": {"type": "string",
+                                               "enum": ["stats", "neighbors", "path"]},
+                                    "node": {"type": "string"},
+                                    "to": {"type": "string"},
+                                    "library": {"type": "string"}}}},
     {"name": "kb_wiki",
      "description": "List compiled wiki pages and any dead links.",
      "inputSchema": {"type": "object", "properties": {"library": {"type": "string"}}}},
@@ -205,6 +214,24 @@ class MCPServer:
                 return self._text("No facts.")
             return self._text("\n".join(f"{i.key} = {i.value} [{i.status}]"
                                         for i in items))
+
+        if name == "kb_graph":
+            from .graph import GraphStore
+            g = GraphStore(self.store)
+            library = args.get("library") or "default"
+            action = args.get("action", "stats")
+            if action == "stats":
+                return self._text(json.dumps(g.stats(self.tenant_id, library),
+                                             ensure_ascii=False))
+            if action == "neighbors":
+                return self._text(json.dumps(
+                    g.neighbors(self.tenant_id, library, str(args.get("node", ""))),
+                    ensure_ascii=False))
+            if action == "path":
+                found = g.path(self.tenant_id, library, str(args.get("node", "")),
+                               str(args.get("to", "")))
+                return self._text(" -> ".join(found) if found else "(no path)")
+            raise MCPError(-32602, f"unknown graph action {action}")
 
         if name == "kb_wiki":
             wiki = WikiStore(self.store)

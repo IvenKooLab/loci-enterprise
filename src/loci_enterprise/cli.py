@@ -28,6 +28,7 @@ from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
 from . import doctor as doctor_mod
+from . import graph as graph_mod
 from . import migrations as migrations_mod
 from . import notify as notify_mod
 from . import portability as portability_mod
@@ -170,6 +171,37 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_graph(args) -> int:
+    store = _store(args)
+    g = graph_mod.GraphStore(store)
+    cmd = args.graph_cmd
+    if cmd == "build":
+        print(json.dumps(g.build(args.tenant, args.library).as_dict(),
+                         ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "stats":
+        print(json.dumps(g.stats(args.tenant, args.library), ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "neighbors":
+        for row in g.neighbors(args.tenant, args.library, args.node,
+                               direction=args.direction):
+            print(f"{row['direction']:<4} {row['kind']:<11} {row['node']}")
+        return 0
+    if cmd == "path":
+        found = g.path(args.tenant, args.library, args.node, args.to,
+                       max_depth=args.depth)
+        print(" -> ".join(found) if found else "(no path)")
+        return 0 if found else 1
+    if cmd == "subgraph":
+        sub = g.subgraph(args.tenant, args.library, args.node, depth=args.depth)
+        print(json.dumps(sub, ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "export":
+        print(json.dumps(g.export(args.tenant, args.library), ensure_ascii=False, indent=2))
+        return 0
+    raise SystemExit(f"unknown graph command {cmd}")
 
 
 def cmd_notify(args) -> int:
@@ -720,6 +752,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("graph", help="knowledge graph: build | stats | neighbors | path | subgraph | export")
+    q.add_argument("graph_cmd",
+                   choices=["build", "stats", "neighbors", "path", "subgraph", "export"])
+    q.add_argument("node", nargs="?", default="")
+    q.add_argument("to", nargs="?", default="")
+    q.add_argument("--library", default="default")
+    q.add_argument("--direction", choices=["in", "out", "both"], default="both")
+    q.add_argument("--depth", type=int, default=2)
+    q.set_defaults(func=cmd_graph)
 
     q = sub.add_parser("notify", help="send alerts to a webhook: test | doctor")
     q.add_argument("notify_cmd", choices=["test", "doctor"])
