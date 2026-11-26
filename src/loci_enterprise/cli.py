@@ -21,6 +21,7 @@ from . import access as access_mod
 from . import feedback as feedback_mod
 from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
+from . import wiki as wiki_mod
 from .retrieval import RetrievalConfig, Retriever
 from .store import Document, Store
 
@@ -156,6 +157,48 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_wiki(args) -> int:
+    store = _store(args)
+    w = wiki_mod.WikiStore(store)
+    cmd = args.wiki_cmd
+    if cmd == "build":
+        report = wiki_mod.WikiBuilder(store, w).build(args.tenant, args.library)
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+        return 0
+    if cmd == "pages":
+        for page in w.pages(args.tenant, args.library):
+            print(f"{page.slug:<30} v{page.version:<3} {len(page.citations)} src  "
+                  f"{page.title}")
+        return 0
+    if cmd == "show":
+        page = w.page(args.tenant, args.library, args.slug)
+        if page is None:
+            print(f"no such page: {args.slug}", file=sys.stderr)
+            return 2
+        print(page.body)
+        print(f"\n-- v{page.version} · sources: {', '.join(page.citations) or '-'}")
+        return 0
+    if cmd == "history":
+        for row in w.revisions(args.tenant, args.library, args.slug):
+            print(f"v{row['version']:<3} {row['created_at']}  {row['chars']:>6} chars  "
+                  f"{row['note']}")
+        return 0
+    if cmd == "rollback":
+        page = w.rollback(args.tenant, args.library, args.slug, args.version,
+                          actor=args.actor)
+        print(f"restored {args.slug} from v{args.version} as v{page.version}")
+        return 0
+    if cmd == "links":
+        dead = w.dead_links(args.tenant, args.library)
+        if not dead:
+            print("no dead links")
+            return 0
+        for row in dead:
+            print(f"{row['from']} -> [[{row['to']}]]")
+        return 0
+    raise SystemExit(f"unknown wiki command {cmd}")
 
 
 def cmd_sync(args) -> int:
@@ -389,6 +432,15 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("wiki", help="compiled wiki: build | pages | show | history | rollback | links")
+    q.add_argument("wiki_cmd",
+                   choices=["build", "pages", "show", "history", "rollback", "links"])
+    q.add_argument("slug", nargs="?", default="")
+    q.add_argument("version", nargs="?", type=int, default=0)
+    q.add_argument("--library", default="default")
+    q.add_argument("--actor", default="cli")
+    q.set_defaults(func=cmd_wiki)
 
     q = sub.add_parser("sync", help="sync a data source into a library")
     q.add_argument("kind", choices=["local", "rss", "web", "sitemap"])
