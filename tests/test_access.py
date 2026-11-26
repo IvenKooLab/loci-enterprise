@@ -81,8 +81,12 @@ def test_key_plaintext_is_never_stored(ac):
                                 (issued.key_id,)).fetchone()
     dumped = " ".join(str(v) for v in tuple(row))
     assert issued.token not in dumped
-    secret = issued.token.rsplit("_", 1)[-1]
+    # the secret is everything after "lek_<key_id>_"; url-safe base64 may
+    # itself contain underscores, so slice by the known prefix length
+    secret = issued.token[len("lek_") + len(issued.key_id) + 1:]
+    assert len(secret) >= 20
     assert secret not in dumped
+    assert row["digest"] != secret
 
 
 def test_wrong_secret_is_rejected(ac):
