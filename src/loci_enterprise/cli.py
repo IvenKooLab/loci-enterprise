@@ -27,6 +27,7 @@ from . import storage as storage_mod
 from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
+from . import doctor as doctor_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
 from . import providers as providers_mod
 from . import queue as queue_mod
@@ -166,6 +167,17 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_doctor(args) -> int:
+    report = doctor_mod.run(_store(args), tenant_id=args.tenant,
+                            stale_connector_days=args.stale_days,
+                            stuck_job_minutes=args.stuck_minutes)
+    if args.json:
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(doctor_mod.render(report))
+    return report.exit_code()
 
 
 def cmd_blob(args) -> int:
@@ -647,6 +659,12 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("doctor", help="self-check: integrity, orphans, ACL, jobs, connectors")
+    q.add_argument("--json", action="store_true")
+    q.add_argument("--stale-days", dest="stale_days", type=float, default=7.0)
+    q.add_argument("--stuck-minutes", dest="stuck_minutes", type=float, default=30.0)
+    q.set_defaults(func=cmd_doctor)
 
     q = sub.add_parser("blob", help="content-addressed blob store: put | get | stats")
     q.add_argument("blob_cmd", choices=["put", "get", "stats"])
