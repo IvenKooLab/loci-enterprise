@@ -21,6 +21,7 @@ from . import access as access_mod
 from . import feedback as feedback_mod
 from . import connectors as connectors_mod
 from . import evalmetrics, governance, lifecycle, memory as memory_mod, monitor as monitor_mod
+from . import queue as queue_mod
 from . import wiki as wiki_mod
 from .retrieval import RetrievalConfig, Retriever
 from .store import Document, Store
@@ -157,6 +158,62 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def _handlers(store, tenant):
+    """Built-in job kinds, so the queue is useful without a daemon."""
+    def sync_local(job):
+        conn = connectors_mod.LocalDirConnector(job.payload["path"],
+                                               name=job.payload.get("name", "local"))
+        rep = connectors_mod.SyncEngine(store).sync(
+            conn, tenant_id=job.tenant_id, library=job.payload.get("library", "default"),
+            actor="queue")
+        return json.dumps(rep.as_dict(), ensure_ascii=False)
+
+    def wiki_build(job):
+        rep = wiki_mod.WikiBuilder(store).build(
+            job.tenant_id, job.payload.get("library", "default"), note="queued build")
+        return json.dumps(rep.as_dict(), ensure_ascii=False)
+
+    def memory_expire(job):
+        return f"expired {memory_mod.MemoryStore(store).expire_due(tenant_id=job.tenant_id)}"
+
+    return {"sync.local": sync_local, "wiki.build": wiki_build,
+            "memory.expire": memory_expire}
+
+
+def cmd_queue(args) -> int:
+    store = _store(args)
+    qq = queue_mod.Queue(store)
+    cmd = args.queue_cmd
+    if cmd == "enqueue":
+        payload = json.loads(args.payload) if args.payload else {}
+        job = qq.enqueue(args.tenant, args.kind, payload, priority=args.priority)
+        print(job.id)
+        return 0
+    if cmd == "run":
+        done = qq.drain(_handlers(store, args.tenant), tenant_id=args.tenant,
+                        limit=args.limit)
+        if not done:
+            print("queue empty")
+        for job in done:
+            print(f"{job.kind:<14} {job.status:<10} {job.result[:60] or job.error[:60]}")
+        return 0 if all(j.status == queue_mod.SUCCEEDED for j in done) else 1
+    if cmd == "stats":
+        print(json.dumps(qq.stats(args.tenant), ensure_ascii=False))
+        return 0
+    if cmd == "list":
+        for job in qq.list(args.tenant, status=args.status or None):
+            print(f"{job.id[:8]}  {job.kind:<14} {job.status:<10} "
+                  f"try {job.attempts}/{job.max_attempts}  {job.error[:40]}")
+        return 0
+    if cmd == "cancel":
+        print("cancelled" if qq.cancel(args.tenant, args.job_id) else "not cancellable")
+        return 0
+    if cmd == "reclaim":
+        print(f"reclaimed {qq.reclaim(older_than_seconds=args.older_than)} job(s)")
+        return 0
+    raise SystemExit(f"unknown queue command {cmd}")
 
 
 def cmd_wiki(args) -> int:
@@ -432,6 +489,18 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("queue", help="jobs: enqueue | run | stats | list | cancel | reclaim")
+    q.add_argument("queue_cmd",
+                   choices=["enqueue", "run", "stats", "list", "cancel", "reclaim"])
+    q.add_argument("kind", nargs="?", default="")
+    q.add_argument("--payload", default="")
+    q.add_argument("--priority", type=int, default=0)
+    q.add_argument("--status", default="")
+    q.add_argument("--job-id", dest="job_id", default="")
+    q.add_argument("--limit", type=int, default=100)
+    q.add_argument("--older-than", dest="older_than", type=float, default=300)
+    q.set_defaults(func=cmd_queue)
 
     q = sub.add_parser("wiki", help="compiled wiki: build | pages | show | history | rollback | links")
     q.add_argument("wiki_cmd",
