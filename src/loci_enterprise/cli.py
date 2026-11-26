@@ -15,12 +15,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from . import access as access_mod
 from . import feedback as feedback_mod
 from . import agent as agent_mod
 from . import mcp as mcp_mod
+from . import scheduler as scheduler_mod
 from . import service as service_mod
 from . import backends as backends_mod
 from . import connectors as connectors_mod
@@ -163,6 +165,41 @@ def cmd_chain(args) -> int:
         print(f"{mark} {item['status']:<11} {item['path']:<32} "
               f"{item.get('effective_from') or '-':<12} {item['reason']}")
     return 0
+
+
+def cmd_schedule(args) -> int:
+    store = _store(args)
+    sc = scheduler_mod.Schedules(store)
+    cmd = args.schedule_cmd
+    if cmd == "add":
+        payload = json.loads(args.payload) if args.payload else {}
+        sc.add(args.tenant, args.name, args.kind,
+               interval_seconds=args.every, payload=payload,
+               first_run_in=args.first_run_in)
+        print(f"scheduled {args.name}: {args.kind} every {args.every:.0f}s")
+        return 0
+    if cmd == "list":
+        for row in sc.list(args.tenant):
+            state = "on" if row.enabled else "off"
+            nxt = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(row.next_run))
+            print(f"{row.name:<20} {row.kind:<16} every {row.interval_s:>7.0f}s  "
+                  f"{state}  next {nxt}")
+        return 0
+    if cmd == "remove":
+        print("removed" if sc.remove(args.tenant, args.name) else "no such schedule")
+        return 0
+    if cmd in ("enable", "disable"):
+        ok = sc.set_enabled(args.tenant, args.name, cmd == "enable")
+        print(f"{cmd}d" if ok else "no such schedule")
+        return 0
+    if cmd == "tick":
+        fired = sc.tick(queue_mod.Queue(store), limit=args.limit)
+        for row in fired:
+            print(f"{row['schedule']:<20} -> job {row['job_id'][:8]} ({row['kind']})")
+        if not fired:
+            print("nothing due")
+        return 0
+    raise SystemExit(f"unknown schedule command {cmd}")
 
 
 def cmd_serve(args) -> int:
@@ -589,6 +626,17 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("path")
     q.add_argument("--library", default="default")
     q.set_defaults(func=cmd_chain)
+
+    q = sub.add_parser("schedule", help="periodic jobs: add | list | remove | enable | disable | tick")
+    q.add_argument("schedule_cmd",
+                   choices=["add", "list", "remove", "enable", "disable", "tick"])
+    q.add_argument("name", nargs="?", default="")
+    q.add_argument("kind", nargs="?", default="")
+    q.add_argument("--every", type=float, default=3600.0)
+    q.add_argument("--payload", default="")
+    q.add_argument("--first-run-in", dest="first_run_in", type=float, default=None)
+    q.add_argument("--limit", type=int, default=100)
+    q.set_defaults(func=cmd_schedule)
 
     q = sub.add_parser("serve", help="serve the HTTP API")
     q.add_argument("--host", default="127.0.0.1")
